@@ -1,0 +1,93 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates the Amazon FSx for Windows File Server.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Common Settings
+        Parameters:
+          - ProjectName
+          - Environment
+
+Parameters:
+  ProjectName:
+    Description: Project Name
+    Type: String
+    Default: unnamed
+  Environment:
+    Description: Environment
+    Type: String
+    Default: dev
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+  SubnetID1:
+    Type: AWS::EC2::Subnet::Id
+  FSxServiceAccountPassword:
+    Type: String
+    NoEcho: true
+
+Resources:
+  FSxFileSystem:
+    Type: "AWS::FSx::FileSystem"
+    Properties:
+      FileSystemType: "WINDOWS"
+      StorageCapacity: 32
+      SubnetIds:
+        - !Ref SubnetID1
+      # KmsKeyId: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/b14c0a3a-a1ee-4e0d-b6c3-90343881de90"
+      WindowsConfiguration:
+        AutomaticBackupRetentionDays: 3
+        CopyTagsToBackups: false
+        DailyAutomaticBackupStartTime: "16:30"
+        ThroughputCapacity: 32
+        WeeklyMaintenanceStartTime: "5:18:30"
+        DeploymentType: "SINGLE_AZ_2"
+        PreferredSubnetId: !Ref SubnetID1
+        SelfManagedActiveDirectoryConfiguration:
+          DomainName: "ec2domain.example.com"
+          OrganizationalUnitDistinguishedName: "OU=FSxForWin, DC=ec2domain, DC=example, DC=com"
+          FileSystemAdministratorsGroup: "FSxAdminGroup"
+          UserName: "FSxServiceAccount"
+          DnsIps:
+            - "10.1.1.130"
+          Password: !Ref FSxServiceAccountPassword
+        Aliases:
+          - "share.ec2domain.example.com"
+      StorageType: "SSD"
+      SecurityGroupIds:
+        - !Ref "SecurityGroup1"
+      Tags:
+        - Key: "Name"
+          Value: "fsx-cfn"
+
+  # ------------------------------------------------------------------------------------ #
+  # Security Group
+  # ------------------------------------------------------------------------------------ #
+  # FSx for Windows File Server
+  SecurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${Environment}-fsx-sg
+      GroupDescription: FSx for Windows File Server Security Group
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "0.0.0.0/0"
+          FromPort: 5985
+          IpProtocol: "tcp"
+          ToPort: 5985
+      SecurityGroupEgress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: "-1"
+      VpcId: !Ref VPCID
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-fsx-sg
