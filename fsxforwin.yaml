@@ -1,0 +1,145 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates the Amazon FSx for Windows File Server.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Common Settings
+        Parameters:
+          - ProjectName
+          - Environment
+
+Parameters:
+  ProjectName:
+    Description: Project Name
+    Type: String
+    Default: unnamed
+  Environment:
+    Description: Environment
+    Type: String
+    Default: dev
+    AllowedValues:
+      - prd
+      - dev
+      - stg
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+  SubnetID1:
+    Type: AWS::EC2::Subnet::Id
+  FSxServiceAccountPassword:
+    Type: String
+    NoEcho: true
+
+Resources:
+  FSxFileSystem:
+    Type: "AWS::FSx::FileSystem"
+    Properties:
+      FileSystemType: "WINDOWS"
+      StorageCapacity: 2048
+      SubnetIds:
+        - !Ref SubnetID1
+      WindowsConfiguration:
+        AutomaticBackupRetentionDays: 4
+        CopyTagsToBackups: false
+        DailyAutomaticBackupStartTime: "16:30"
+        ThroughputCapacity: 32
+        WeeklyMaintenanceStartTime: "5:18:30"
+        DeploymentType: "SINGLE_AZ_2"
+        PreferredSubnetId: !Ref SubnetID1
+        SelfManagedActiveDirectoryConfiguration:
+          DomainName: "ec2domain.example.com" # Replace!
+          OrganizationalUnitDistinguishedName: "OU=FSxForWin, DC=ec2domain, DC=example, DC=com" # Replace!
+          FileSystemAdministratorsGroup: "FSxAdminGroup"
+          UserName: "FSxServiceAccount"
+          DnsIps:
+            - "10.1.1.130" # Replace!
+          Password: !Ref FSxServiceAccountPassword
+        Aliases:
+          - "share.ec2domain.example.com" # Replace!
+      StorageType: "SSD"
+      SecurityGroupIds:
+        - !Ref "SecurityGroup1"
+      Tags:
+        - Key: "Name"
+          Value: !Sub ${ProjectName}-${Environment}-fsx
+
+  # ------------------------------------------------------------------------------------ #
+  # Security Group
+  # ------------------------------------------------------------------------------------ #
+  # FSx for Windows File Server
+  SecurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${Environment}-sg-fsx
+      GroupDescription: FSx for Windows File Server Security Group
+      SecurityGroupIngress:
+        - CidrIp: "172.18.14.0/23"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "172.18.10.0/23"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "172.18.12.0/23"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "10.3.250.0/23"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "10.3.10.8/32"
+          FromPort: 445
+          IpProtocol: "tcp"
+          ToPort: 445
+        - CidrIp: "10.3.10.8/32"
+          FromPort: 5985
+          IpProtocol: "tcp"
+          ToPort: 5985
+      SecurityGroupEgress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: "-1"
+      VpcId: !Ref VPCID
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-sg-fsx
+
+  # ------------------------------------------------------------#
+  # S3 Bucket for VPC Flow Logs
+  # ------------------------------------------------------------#
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub ${ProjectName}-${Environment}-fsx-logs-${AWS::AccountId}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: "BucketOwnerEnforced"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+            BucketKeyEnabled: false
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleMultipartUpload
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+            Status: "Enabled"
+          - Id: CurrentVersionExpiration
+            ExpirationInDays: 90
+            Status: "Enabled"
+          - Id: NoncurrentVersionExpiration
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 10
+            Status: "Enabled"
